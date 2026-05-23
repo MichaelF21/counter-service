@@ -106,12 +106,11 @@ jobs:
           ignore-unfixed: true
 
       - name: Push image
-        run: |
-          docker push "${{ steps.image.outputs.uri }}"
-          # Also push a moving tag so image-updater has a stable starting point.
-          docker tag "${{ steps.image.outputs.uri }}" \
-            "${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest-main"
-          docker push "${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest-main"
+        # Only the immutable SHA tag is pushed. ECR is configured with
+        # IMMUTABLE tag policy, so moving tags (`:latest-main`) would fail on
+        # the second push. argocd-image-updater discovers new SHA tags via
+        # the regex `^[0-9a-f]{40}$` and bumps the kustomize overlay.
+        run: docker push "${{ steps.image.outputs.uri }}"
 
   manifests-validate:
     name: Validate manifests
