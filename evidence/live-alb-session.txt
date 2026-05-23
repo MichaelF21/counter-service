@@ -1,0 +1,25 @@
+=== Live URL ===
+http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+
+=== curl session ===
+$ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+counter-service v0.1.0 count: 2
+
+$ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+count: 3
+$ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+count: 4
+$ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+count: 5
+$ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+counter-service v0.1.0 count: 5
+
+$ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/healthz
+ok
+$ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/readyz
+ready
+$ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/version
+0.1.0
+
+=== /metrics excerpt ===
+counter_http_requests_total{endpoint="/healthz",method="GET",status="200"} 42.0 counter_http_requests_total{endpoint="/readyz",method="GET",status="200"} 27.0 counter_http_requests_total{endpoint="/metrics",method="GET",status="200"} 5.0 counter_http_requests_total{endpoint="/",method="POST",status="201"} 3.0 counter_http_requests_total{endpoint="/",method="GET",status="200"} 1.0 counter_http_requests_total{endpoint="/version",method="GET",status="200"} 1.0 counter_http_requests_created{endpoint="/healthz",method="GET",status="200"} 1.7795421562654672e+09 counter_http_requests_created{endpoint="/readyz",method="GET",status="200"} 1.7795421566811142e+09

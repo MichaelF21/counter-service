@@ -4,6 +4,22 @@
 > counts `POST` requests and returns the running total on `GET`. Containerised,
 > deployed to EKS via Argo CD, and managed end-to-end through GitHub Actions.
 
+**Live URL** (HTTP, port 80):
+<http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/>
+
+```bash
+$ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+counter-service v0.1.1
+count: 7
+
+$ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+count: 8
+```
+
+The ALB will be torn down when this AWS account is reclaimed; full evidence
+(curl session, kubectl outputs, CI logs, CD round-trip showing the v0.1.0 →
+v0.1.1 bump propagating live) is committed under `evidence/`.
+
 Fork of [shainberg/counter-service](https://github.com/shainberg/counter-service)
 (upstream was empty — service is authored from scratch in this repo).
 
