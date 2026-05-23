@@ -64,6 +64,36 @@ data "aws_iam_policy_document" "github_actions_inline" {
     ]
     resources = [aws_ecr_repository.counter_service.arn]
   }
+  # Terraform state access (used by the `terraform` workflow's plan/apply jobs).
+  statement {
+    sid       = "TFStateBucketList"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:${local.partition}:s3:::counter-service-tfstate-${local.account_id}-${var.region}"]
+  }
+  statement {
+    sid    = "TFStateObjectRW"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+    ]
+    resources = ["arn:${local.partition}:s3:::counter-service-tfstate-${local.account_id}-${var.region}/*"]
+  }
+  # KMS access for the state bucket's CMK (bootstrap created this key with a
+  # known alias).
+  statement {
+    sid    = "TFStateKMS"
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:Encrypt",
+      "kms:GenerateDataKey",
+      "kms:DescribeKey",
+    ]
+    resources = ["arn:${local.partition}:kms:${var.region}:${local.account_id}:alias/counter-service-tfstate"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_actions" {
