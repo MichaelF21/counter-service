@@ -8,6 +8,7 @@ from app.main import create_app
 @pytest.fixture
 def settings() -> Settings:
     return Settings(backend="memory", app_version="test-1.2.3", log_level="WARNING")
+    # tests pin their own version string; production version is in app/__init__.py
 
 
 @pytest.fixture

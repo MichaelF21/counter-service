@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     redis_key: str = Field(default="counter:value")
     restart_key: str = Field(default="counter:restarts")
     log_level: str = Field(default="INFO")
-    app_version: str = Field(default="0.1.0", description="Surfaced on GET / to demo CD updates")
+    app_version: str = Field(default="0.1.1", description="Surfaced on GET / to demo CD updates")
 
 
 def get_settings() -> Settings:
