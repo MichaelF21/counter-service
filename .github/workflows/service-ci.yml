@@ -1,0 +1,124 @@
+name: service-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "service/**"
+      - "deploy/**"
+      - ".github/workflows/service-ci.yml"
+  pull_request:
+    paths:
+      - "service/**"
+      - "deploy/**"
+      - ".github/workflows/service-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # OIDC token for AWS
+  packages: read
+
+concurrency:
+  group: service-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: counter-service
+  IMAGE_TAG_SHA: ${{ github.sha }}
+
+jobs:
+  test:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff
+        run: ruff check app tests
+
+      - name: Mypy
+        run: mypy app
+
+      - name: Pytest
+        run: pytest -q
+
+  build-and-push:
+    name: Build & push image
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.image.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image URI
+        id: image
+        run: |
+          echo "uri=${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG_SHA }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg APP_VERSION=${{ env.IMAGE_TAG_SHA }} \
+            -t "${{ steps.image.outputs.uri }}" \
+            service
+
+      - name: Trivy scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.image.outputs.uri }}
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Push image
+        run: |
+          docker push "${{ steps.image.outputs.uri }}"
+          # Also push a moving tag so image-updater has a stable starting point.
+          docker tag "${{ steps.image.outputs.uri }}" \
+            "${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest-main"
+          docker push "${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest-main"
+
+  manifests-validate:
+    name: Validate manifests
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up kustomize
+        run: |
+          curl -sL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v5.5.0/kustomize_v5.5.0_linux_amd64.tar.gz | tar xz
+          sudo mv kustomize /usr/local/bin/
+      - name: Render
+        run: kustomize build deploy/overlays/prod > /tmp/rendered.yaml
+      - name: Lint with kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -strict -skip ServiceMonitor /tmp/rendered.yaml

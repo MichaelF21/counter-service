@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: counter-service
+  namespace: argocd
+  annotations:
+    # argocd-image-updater watches the ECR repo for new SHA tags and
+    # patches this Application's image override, then commits the change
+    # back to git via the write-back-method (so the desired state stays
+    # in version control).
+    argocd-image-updater.argoproj.io/image-list: counter=630943284793.dkr.ecr.eu-west-2.amazonaws.com/counter-service-prod
+    argocd-image-updater.argoproj.io/counter.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/counter.allow-tags: regexp:^[0-9a-f]{40}$
+    argocd-image-updater.argoproj.io/counter.kustomize.image-name: counter-service
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
+    argocd-image-updater.argoproj.io/git-branch: main
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/MichaelF21/counter-service.git
+    targetRevision: main
+    path: deploy/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false   # base Namespace manifest owns this
+      - PrunePropagationPolicy=foreground
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  revisionHistoryLimit: 10

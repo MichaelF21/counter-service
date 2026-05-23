@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: counter-service
+  namespace: prod
+  labels:
+    # kube-prometheus-stack's default Prometheus selects ServiceMonitors via this label.
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: counter-service
+  namespaceSelector:
+    matchNames:
+      - prod
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

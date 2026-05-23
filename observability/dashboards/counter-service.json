@@ -1,0 +1,98 @@
+{
+  "uid": "counter-service",
+  "title": "counter-service",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["counter-service", "app"],
+  "time": {"from": "now-1h", "to": "now"},
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"text": "Prometheus", "value": "Prometheus"}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Current counter value",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"expr": "max(counter_value)", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Restarts (max across pods)",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"expr": "max(counter_restart_count)", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Replicas Ready",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"expr": "sum(kube_deployment_status_replicas_ready{namespace=\"prod\",deployment=\"counter-service\"})", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "5xx rate (last 5m)",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"expr": "sum(rate(counter_http_requests_total{status=~\"5..\"}[5m]))", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Request rate by endpoint",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{
+        "expr": "sum by (endpoint, method) (rate(counter_http_requests_total[1m]))",
+        "legendFormat": "{{method}} {{endpoint}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latency p50/p95/p99 (seconds)",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(counter_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(counter_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(counter_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C"}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Counter increments per second",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"expr": "sum(rate(counter_http_requests_total{method=\"POST\",status=\"201\"}[1m]))", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Pod CPU / Memory",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"prod\",pod=~\"counter-service-.*\",container=\"counter-service\"}[1m]))", "legendFormat": "cpu {{pod}}", "refId": "A"},
+        {"expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"prod\",pod=~\"counter-service-.*\",container=\"counter-service\"}) / 1024 / 1024", "legendFormat": "mem MB {{pod}}", "refId": "B"}
+      ]
+    }
+  ]
+}

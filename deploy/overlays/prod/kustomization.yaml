@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prod
+
+resources:
+  - ../../base
+
+# Argo CD image-updater rewrites the tag below on every push to main.
+# Local kubectl apply will fall back to ":latest" — only used for dev/test.
+images:
+  - name: counter-service
+    newName: 630943284793.dkr.ecr.eu-west-2.amazonaws.com/counter-service-prod
+    newTag: latest
+
+labels:
+  - pairs:
+      app.kubernetes.io/version: "0.1.0"
+      app.kubernetes.io/environment: prod
+
+patches:
+  - target:
+      kind: Deployment
+      name: counter-service
+    patch: |-
+      - op: replace
+        path: /spec/template/metadata/labels/app.kubernetes.io~1version
+        value: "0.1.0"

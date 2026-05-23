@@ -1,0 +1,42 @@
+$ docker compose up -d --build
+ Container service-redis-1 Started (healthy)
+ Container service-counter-service-1 Started
+
+$ curl http://localhost:8090/
+counter-service v0.1.0-compose
+count: 0
+
+$ curl -X POST http://localhost:8090/
+count: 1
+$ curl -X POST http://localhost:8090/
+count: 2
+$ curl -X POST http://localhost:8090/
+count: 3
+
+$ curl http://localhost:8090/
+counter-service v0.1.0-compose
+count: 3
+
+# Restart only the service container; Redis AOF + PVC keep the count.
+$ docker compose restart counter-service
+ Container service-counter-service-1 Restarting → Started
+
+$ curl http://localhost:8090/
+counter-service v0.1.0-compose
+count: 3                                  # ← persisted across restart ✓
+
+$ curl http://localhost:8090/version
+0.1.0-compose
+
+$ curl http://localhost:8090/readyz
+ready
+
+$ curl -s http://localhost:8090/metrics | grep -E "^counter_(restart|value)"
+counter_value 3.0
+counter_restart_count 2.0                 # ← record_restart() counted both lifecycle starts ✓
+
+# Verified end-to-end:
+#  - POST increments, GET returns running total
+#  - Restart of service container preserves counter via Redis AOF
+#  - /healthz, /readyz, /version, /metrics all functional
+#  - Structured JSON logs (see `docker compose logs counter-service | jq`)

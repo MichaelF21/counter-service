@@ -127,3 +127,38 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl.bak
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.binary
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# AWS / credentials
+*.csv
+!docs/**/*.csv
+aws-credentials*
+.aws/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local secrets / kubeconfig
+kubeconfig
+kubeconfig-*
+*.kubeconfig
+.env.local
+secrets.local.yaml
