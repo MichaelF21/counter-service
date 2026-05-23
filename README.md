@@ -151,7 +151,7 @@ This provisions, in eu-west-2:
   - Secret-at-rest encrypted with project-scoped KMS CMK
   - IRSA enabled, OIDC provider exposed
   - Add-ons: CoreDNS, kube-proxy, VPC-CNI (network-policy enforcement on), EBS CSI
-- ECR repo `counter-service` — KMS-encrypted, immutable tags, scan-on-push, 30-image retention
+- ECR repo `counter-service-prod` (the bare `counter-service` name was already taken in this shared account) — KMS-encrypted, immutable tags, scan-on-push, 30-image retention
 - Cluster add-ons via Helm:
   - AWS Load Balancer Controller (ALB provisioning)
   - Cluster Autoscaler (node scale 2→6)
