@@ -49,6 +49,22 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # The TF helm provider does not run `helm repo update` — without a cached
+      # index it errors with "no cached repo found". Pre-populating is the fix
+      # documented by hashicorp/terraform-provider-helm.
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: Prime helm repo cache
+        run: |
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo add autoscaler https://kubernetes.github.io/autoscaler
+          helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
+
       - name: terraform fmt
         run: terraform fmt -check -recursive ../..
 
@@ -89,6 +105,19 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: Prime helm repo cache
+        run: |
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo add autoscaler https://kubernetes.github.io/autoscaler
+          helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
 
       - name: terraform init
         run: terraform init -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"

@@ -11,7 +11,7 @@ resources:
 images:
   - name: counter-service
     newName: 630943284793.dkr.ecr.eu-west-2.amazonaws.com/counter-service-prod
-    newTag: latest
+    newTag: 3f1379f00a1c43cf5728a27e1b8b737d67036905
 
 labels:
   - pairs:

@@ -42,12 +42,16 @@ module "eks" {
     }
     vpc-cni = {
       most_recent = true
+      # In VPC CNI v1.14+ the network-policy toggle moved out of env into
+      # top-level config; node-agent must also be enabled to enforce policies.
       configuration_values = jsonencode({
+        enableNetworkPolicy = "true"
+        nodeAgent = {
+          enabled = true
+        }
         env = {
-          # Enable network policy enforcement at the CNI layer.
           ENABLE_POD_ENI           = "true"
           ENABLE_PREFIX_DELEGATION = "true"
-          ENABLE_NETWORK_POLICY    = "true"
         }
       })
     }

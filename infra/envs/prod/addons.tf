@@ -124,7 +124,10 @@ resource "helm_release" "external_secrets" {
     value = module.external_secrets_irsa.iam_role_arn
   }
 
-  depends_on = [module.eks]
+  # ESO's webhook race: the AWS LBC installs a cluster-wide mutating webhook on
+  # all Services. While LBC pods aren't ready yet, any Service create blocks.
+  # Sequencing ESO after LBC avoids the race.
+  depends_on = [module.eks, helm_release.aws_lbc]
 }
 
 resource "helm_release" "kube_prometheus_stack" {
@@ -196,7 +199,9 @@ resource "helm_release" "argocd_image_updater" {
         prefix      = "${local.account_id}.dkr.ecr.${var.region}.amazonaws.com"
         ping        = true
         credentials = "ext:/scripts/ecr-login.sh"
-        credexpire  = "10h"
+        # NB: field name is `credsexpire` (cred-s-expire), not `credexpire`.
+        # The latter silently parses but is rejected at runtime in v0.14.0+.
+        credsexpire = "10h"
       }]
     }
     # ECR login script: image-updater calls this every 10h to refresh creds via IRSA.

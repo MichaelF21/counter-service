@@ -64,11 +64,52 @@ data "aws_iam_policy_document" "github_actions_inline" {
     ]
     resources = [aws_ecr_repository.counter_service.arn]
   }
+  # Terraform state access (used by the `terraform` workflow's plan/apply jobs).
+  statement {
+    sid       = "TFStateBucketList"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:${local.partition}:s3:::counter-service-tfstate-${local.account_id}-${var.region}"]
+  }
+  statement {
+    sid    = "TFStateObjectRW"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+    ]
+    resources = ["arn:${local.partition}:s3:::counter-service-tfstate-${local.account_id}-${var.region}/*"]
+  }
+  # KMS access for the state bucket's CMK (bootstrap created this key with a
+  # known alias).
+  statement {
+    sid    = "TFStateKMS"
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:Encrypt",
+      "kms:GenerateDataKey",
+      "kms:DescribeKey",
+    ]
+    resources = ["arn:${local.partition}:kms:${var.region}:${local.account_id}:alias/counter-service-tfstate"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_actions" {
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.github_actions_inline.json
+}
+
+# Terraform plan/apply must refresh every resource in state (EKS, KMS, IAM
+# roles, VPC, CloudWatch logs, etc.). For this assignment we attach
+# AdministratorAccess to the CI role. In real prod, scope this down via:
+#   - per-service Allow policies on resources matching `*counter-service*`
+#   - or a Permissions Boundary that caps blast radius
+#   - or a SCP at the OU level
+resource "aws_iam_role_policy_attachment" "github_actions_admin" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = "arn:${local.partition}:iam::aws:policy/AdministratorAccess"
 }
 
 ###############################################################################
