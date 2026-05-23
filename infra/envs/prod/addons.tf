@@ -226,27 +226,14 @@ resource "helm_release" "argocd_image_updater" {
   depends_on = [helm_release.argocd]
 }
 
-# IRSA for argocd-image-updater to read ECR.
-data "aws_iam_policy_document" "image_updater_assume" {
-  statement {
-    effect  = "Allow"
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-    principals {
-      type        = "Federated"
-      identifiers = [module.eks.oidc_provider_arn]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:sub"
-      values   = ["system:serviceaccount:argocd:argocd-image-updater"]
-    }
-  }
-}
-
+# IRSA trust policy for argocd-image-updater lives in policies/.
 resource "aws_iam_role" "argocd_image_updater" {
-  name               = "${var.cluster_name}-image-updater"
-  assume_role_policy = data.aws_iam_policy_document.image_updater_assume.json
-  tags               = var.tags
+  name = "${var.cluster_name}-image-updater"
+  assume_role_policy = templatefile("${path.module}/policies/image-updater-assume.json.tpl", {
+    oidc_provider_arn = module.eks.oidc_provider_arn
+    oidc_issuer_host  = replace(module.eks.cluster_oidc_issuer_url, "https://", "")
+  })
+  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "image_updater_ecr_read" {

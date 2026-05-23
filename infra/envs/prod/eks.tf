@@ -33,6 +33,25 @@ module "eks" {
   authentication_mode                      = "API"
   enable_cluster_creator_admin_permissions = true
 
+  # The GH Actions OIDC role also needs cluster access so that `terraform plan`
+  # in CI can read live K8s/Helm resources (the kubernetes + helm providers
+  # call EKS get-token and need cluster RBAC). Without this entry every CI
+  # plan errors with "Kubernetes cluster unreachable: server has asked for
+  # client to provide credentials".
+  access_entries = {
+    github_actions = {
+      principal_arn = aws_iam_role.github_actions.arn
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:${local.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
+
   cluster_addons = {
     coredns = {
       most_recent = true
