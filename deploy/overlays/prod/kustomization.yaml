@@ -15,7 +15,7 @@ images:
 
 labels:
   - pairs:
-      app.kubernetes.io/version: "0.1.0"
+      app.kubernetes.io/version: "0.1.1"
       app.kubernetes.io/environment: prod
 
 patches:
@@ -25,4 +25,4 @@ patches:
     patch: |-
       - op: replace
         path: /spec/template/metadata/labels/app.kubernetes.io~1version
-        value: "0.1.0"
+        value: "0.1.1"
