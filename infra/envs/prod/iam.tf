@@ -101,6 +101,17 @@ resource "aws_iam_role_policy" "github_actions" {
   policy = data.aws_iam_policy_document.github_actions_inline.json
 }
 
+# Terraform plan/apply must refresh every resource in state (EKS, KMS, IAM
+# roles, VPC, CloudWatch logs, etc.). For this assignment we attach
+# AdministratorAccess to the CI role. In real prod, scope this down via:
+#   - per-service Allow policies on resources matching `*counter-service*`
+#   - or a Permissions Boundary that caps blast radius
+#   - or a SCP at the OU level
+resource "aws_iam_role_policy_attachment" "github_actions_admin" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = "arn:${local.partition}:iam::aws:policy/AdministratorAccess"
+}
+
 ###############################################################################
 # IRSA: AWS Load Balancer Controller
 ###############################################################################
