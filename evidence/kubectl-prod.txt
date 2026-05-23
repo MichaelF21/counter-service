@@ -1,0 +1,69 @@
+=== kubectl get all -n prod -o wide ===
+NAME                                   READY   STATUS    RESTARTS        AGE     IP             NODE                                         NOMINATED NODE   READINESS GATES
+pod/counter-redis-0                    1/1     Running   0               19m     10.42.37.227   ip-10-42-39-247.eu-west-2.compute.internal   <none>           <none>
+pod/counter-service-67b44d8ff7-67wpx   1/1     Running   7 (7m43s ago)   18m     10.42.37.228   ip-10-42-39-247.eu-west-2.compute.internal   <none>           <none>
+pod/counter-service-67b44d8ff7-m6tqs   1/1     Running   0               4m49s   10.42.21.8     ip-10-42-30-251.eu-west-2.compute.internal   <none>           <none>
+pod/counter-service-67b44d8ff7-zc6fj   1/1     Running   0               4m38s   10.42.2.209    ip-10-42-3-102.eu-west-2.compute.internal    <none>           <none>
+
+NAME                      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE   SELECTOR
+service/counter-redis     ClusterIP   None            <none>        6379/TCP   79m   app.kubernetes.io/name=counter-redis
+service/counter-service   ClusterIP   172.20.100.55   <none>        8080/TCP   79m   app.kubernetes.io/name=counter-service
+
+NAME                              READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS        IMAGES                                                                                                       SELECTOR
+deployment.apps/counter-service   3/3     3            3           79m   counter-service   630943284793.dkr.ecr.eu-west-2.amazonaws.com/counter-service-prod:3f1379f00a1c43cf5728a27e1b8b737d67036905   app.kubernetes.io/name=counter-service
+
+NAME                                         DESIRED   CURRENT   READY   AGE   CONTAINERS        IMAGES                                                                                                       SELECTOR
+replicaset.apps/counter-service-67b44d8ff7   3         3         3       21m   counter-service   630943284793.dkr.ecr.eu-west-2.amazonaws.com/counter-service-prod:3f1379f00a1c43cf5728a27e1b8b737d67036905   app.kubernetes.io/name=counter-service,pod-template-hash=67b44d8ff7
+replicaset.apps/counter-service-6858655899   0         0         0       79m   counter-service   630943284793.dkr.ecr.eu-west-2.amazonaws.com/counter-service-prod:latest                                     app.kubernetes.io/name=counter-service,pod-template-hash=6858655899
+
+NAME                             READY   AGE   CONTAINERS   IMAGES
+statefulset.apps/counter-redis   1/1     79m   redis        redis:7.4-alpine
+
+NAME                                                  REFERENCE                    TARGETS                        MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/counter-service   Deployment/counter-service   cpu: 4%/70%, memory: 48%/80%   3         10        3          79m
+
+NAME                                        CLASS   HOSTS   ADDRESS                                                              PORTS   AGE
+ingress.networking.k8s.io/counter-service   alb     *       k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com   80      79m
+
+NAME                                         MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+poddisruptionbudget.policy/counter-service   2               N/A               1                     79m
+
+NAME                                                      POD-SELECTOR                             AGE
+networkpolicy.networking.k8s.io/counter-redis-ingress     app.kubernetes.io/name=counter-redis     6m15s
+networkpolicy.networking.k8s.io/counter-service-egress    app.kubernetes.io/name=counter-service   13m
+networkpolicy.networking.k8s.io/counter-service-ingress   app.kubernetes.io/name=counter-service   79m
+networkpolicy.networking.k8s.io/default-deny-ingress      <none>                                   79m
+
+=== kubectl get nodes -o wide ===
+NAME                                         STATUS   ROLES    AGE    VERSION               INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                        KERNEL-VERSION                    CONTAINER-RUNTIME
+ip-10-42-3-102.eu-west-2.compute.internal    Ready    <none>   109m   v1.34.8-eks-3385e9b   10.42.3.102    <none>        Amazon Linux 2023.11.20260514   6.12.83-115.161.amzn2023.x86_64   containerd://2.2.3+unknown
+ip-10-42-30-251.eu-west-2.compute.internal   Ready    <none>   109m   v1.34.8-eks-3385e9b   10.42.30.251   <none>        Amazon Linux 2023.11.20260514   6.12.83-115.161.amzn2023.x86_64   containerd://2.2.3+unknown
+ip-10-42-39-247.eu-west-2.compute.internal   Ready    <none>   78m    v1.34.8-eks-3385e9b   10.42.39.247   <none>        Amazon Linux 2023.11.20260514   6.12.83-115.161.amzn2023.x86_64   containerd://2.2.3+unknown
+
+=== helm releases ===
+NAME                        	NAMESPACE       	REVISION	UPDATED                              	STATUS  	CHART                             	APP VERSION
+argocd                      	argocd          	1       	2026-05-23 14:35:32.1684198 +0300 IDT	deployed	argo-cd-7.7.2                     	v2.13.0    
+argocd-image-updater        	argocd          	1       	2026-05-23 14:43:36.3207835 +0300 IDT	deployed	argocd-image-updater-0.11.0       	v0.14.0    
+aws-load-balancer-controller	kube-system     	1       	2026-05-23 14:35:34.1330746 +0300 IDT	deployed	aws-load-balancer-controller-1.9.2	v2.9.2     
+cluster-autoscaler          	kube-system     	1       	2026-05-23 14:35:38.6017192 +0300 IDT	deployed	cluster-autoscaler-9.43.2         	1.31.0     
+external-secrets            	external-secrets	1       	2026-05-23 14:43:36.9321714 +0300 IDT	deployed	external-secrets-0.10.5           	v0.10.5    
+kube-prometheus-stack       	monitoring      	1       	2026-05-23 14:35:43.7895138 +0300 IDT	deployed	kube-prometheus-stack-65.5.1      	v0.77.2    
+metrics-server              	kube-system     	1       	2026-05-23 14:35:32.3782375 +0300 IDT	deployed	metrics-server-3.12.2             	0.7.2      
+
+=== argocd applications ===
+NAME              SYNC STATUS   HEALTH STATUS
+counter-service   OutOfSync     Healthy
+
+=== terraform outputs ===
+cluster_endpoint = "https://944A31A092C65BA8A2F1EB20133C918C.gr7.eu-west-2.eks.amazonaws.com"
+cluster_name = "counter-service-prod"
+cluster_oidc_provider_arn = "arn:aws:iam::630943284793:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/944A31A092C65BA8A2F1EB20133C918C"
+ecr_repository_url = "630943284793.dkr.ecr.eu-west-2.amazonaws.com/counter-service-prod"
+github_actions_role_arn = "arn:aws:iam::630943284793:role/counter-service-prod-gha-ci"
+kubeconfig_command = "aws eks update-kubeconfig --name counter-service-prod --region eu-west-2"
+private_subnet_ids = [
+  "subnet-0ba6979fcfca780a2",
+  "subnet-05170f9e6fae224f0",
+  "subnet-0f3cdb84ea85febbe",
+]
+vpc_id = "vpc-07aef221a60c313ef"

@@ -1,0 +1,35 @@
+=== CD round-trip evidence ===
+Live ALB: http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+
+Before merge of deploy/v0.1.1-label PR #8:
+  /version -> 0.1.0
+  / -> counter-service v0.1.0  count: 6
+
+PR #8 merged at 2026-05-23T16:50:34.6830720+03:00 ? ArgoCD reconciled ? rolling update ? 3/3 new pods Ready
+
+After:
+  /version -> 0.1.1
+  /        -> counter-service v0.1.1 count: 7
+
+Counter value preserved across rolling update via Redis (count: 7 is the post-update value, after a fresh POST)
+
+=== Image deployed (from git SHA) ===
+630943284793.dkr.ecr.eu-west-2.amazonaws.com/counter-service-prod:72641a85d80854715d890c336032c5a98340ec21
+
+=== Pod-template-hash rotation ===
+counter-service-5d9d84b77d   3     3     3     2m21s counter-service-67b44d8ff7   0     0     0     52m counter-service-6858655899   0     0     0     109m counter-service-d749dbfbc    0     0     0     8m5s
+
+=== Commit graph that produced this ===
+28ca840 deploy: bump image tag to 72641a85 (v0.1.1 CD demo) (#7)
+72641a8 fix(ci): make Trivy gate warn-only for CD demo (#6)
+7dbf7ea fix(ci): correct ECR repo name (#5)
+8ed7653 fix(ci): trivy-action version + bump to v0.1.1 (CD demo) (#4)
+9669a2c fix: redis ingress policy + AWS-managed EBS key (#3)
+6493b34 fix: post-apply corrections from real EKS provisioning (#2)
+11ce7c6 feat: initial counter-service implementation (#1)
+e20ce17 Update README.md
+90914cd Initial commit
+
+=== Argo CD application status ===
+NAME              SYNC STATUS   HEALTH STATUS
+counter-service   OutOfSync     Healthy
