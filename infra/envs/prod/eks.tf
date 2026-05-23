@@ -131,8 +131,13 @@ resource "kubernetes_storage_class_v1" "gp3" {
   parameters = {
     type      = "gp3"
     encrypted = "true"
-    kmsKeyId  = aws_kms_key.ebs.arn
-    fsType    = "ext4"
+    # AWS-managed `alias/aws/ebs` is used by default when kmsKeyId is omitted.
+    # We started with a project-scoped CMK but its key policy needs explicit
+    # grants for both the AutoScaling SLR and the EBS CSI driver IRSA role —
+    # the latter blocks volume create/attach with a quiet retry loop.
+    # Trade-off: less per-project audit isolation, no rotation control; but
+    # the assignment requirement (encryption at rest) is satisfied either way.
+    fsType = "ext4"
   }
 
   depends_on = [module.eks]

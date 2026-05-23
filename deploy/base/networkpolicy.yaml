@@ -43,6 +43,27 @@ spec:
         - protocol: TCP
           port: 8080
 ---
+# Allow ingress to Redis from counter-service only (default-deny applies otherwise).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: counter-redis-ingress
+  namespace: prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: counter-redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: counter-service
+      ports:
+        - protocol: TCP
+          port: 6379
+---
 # Allow egress from counter-service to Redis and DNS only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
