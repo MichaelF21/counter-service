@@ -29,16 +29,26 @@ module "eks" {
   # IRSA on by default in module v20+; OIDC provider is created.
   enable_irsa = true
 
-  # Cluster-creator gets cluster-admin via access entry (avoids the aws-auth ConfigMap).
-  authentication_mode                      = "API"
-  enable_cluster_creator_admin_permissions = true
+  # Both principals that might run terraform need EKS API access via access
+  # entries (avoids the legacy aws-auth ConfigMap). We DON'T set
+  # `enable_cluster_creator_admin_permissions = true` because that creates an
+  # entry under a fixed `cluster_creator` key bound to whoever applies first
+  # — CI and a local operator would then conflict on that key. Enumerating
+  # both principals explicitly works around it.
+  authentication_mode = "API"
 
-  # The GH Actions OIDC role also needs cluster access so that `terraform plan`
-  # in CI can read live K8s/Helm resources (the kubernetes + helm providers
-  # call EKS get-token and need cluster RBAC). Without this entry every CI
-  # plan errors with "Kubernetes cluster unreachable: server has asked for
-  # client to provide credentials".
   access_entries = {
+    bootstrap_admin = {
+      principal_arn = data.aws_caller_identity.current.arn
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:${local.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
     github_actions = {
       principal_arn = aws_iam_role.github_actions.arn
       policy_associations = {
