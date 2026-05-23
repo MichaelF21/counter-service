@@ -52,6 +52,16 @@ variable "github_repository" {
   default     = "MichaelF21/counter-service"
 }
 
+# Human admin who needs kubectl-level access to the cluster. Kept as an IAM
+# user ARN (not an assumed-role ARN) so EKS access entry creation succeeds
+# from any caller — including CI, where data.aws_caller_identity.current.arn
+# would resolve to an assumed-role ARN that EKS rejects.
+variable "bootstrap_admin_arn" {
+  type        = string
+  default     = "arn:aws:iam::630943284793:user/michaelfeldman8@gmail.com"
+  description = "IAM user/role ARN granted cluster-admin via EKS access entry."
+}
+
 variable "tags" {
   type = map(string)
   default = {

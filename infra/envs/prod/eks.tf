@@ -39,7 +39,7 @@ module "eks" {
 
   access_entries = {
     bootstrap_admin = {
-      principal_arn = data.aws_caller_identity.current.arn
+      principal_arn = var.bootstrap_admin_arn
       policy_associations = {
         admin = {
           policy_arn = "arn:${local.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
