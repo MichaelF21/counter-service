@@ -31,7 +31,9 @@ env:
 jobs:
   plan:
     name: Plan
-    if: github.event_name == 'pull_request' || github.event.inputs.action == 'plan' || github.event_name == 'push'
+    # Always run plan on PR/push, AND whenever workflow_dispatch is used
+    # (apply needs plan as a dependency, so skipping plan would skip apply too).
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
