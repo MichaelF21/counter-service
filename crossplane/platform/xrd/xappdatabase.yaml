@@ -1,0 +1,96 @@
+---
+# XRD: defines the cluster-scoped Composite (XAppDatabase) AND the
+# namespace-scoped Claim (AppDatabase). Application teams in their own
+# namespaces create AppDatabase claims; the platform team operates against
+# XAppDatabase. OpenAPI v3 schema below validates each request before any
+# Composition runs.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xappdatabases.database.platform.example.com
+spec:
+  group: database.platform.example.com
+  names:
+    kind: XAppDatabase
+    plural: xappdatabases
+  claimNames:
+    kind: AppDatabase
+    plural: appdatabases
+  defaultCompositionRef:
+    name: xappdatabase-postgres
+  defaultCompositeDeletePolicy: Foreground
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [parameters]
+              properties:
+                parameters:
+                  type: object
+                  required: [database, tables]
+                  properties:
+                    database:
+                      type: string
+                      description: "Name of the logical Postgres database to create."
+                      pattern: "^[a-z][a-z0-9_]{1,62}$"
+                    schema:
+                      type: string
+                      description: "Schema inside the database. Defaults to 'public'."
+                      default: public
+                      pattern: "^[a-z][a-z0-9_]{0,62}$"
+                    tables:
+                      type: array
+                      description: "Tables to create inside <database>.<schema>."
+                      minItems: 1
+                      maxItems: 50
+                      items:
+                        type: object
+                        required: [name, columns]
+                        properties:
+                          name:
+                            type: string
+                            pattern: "^[a-z][a-z0-9_]{0,62}$"
+                          columns:
+                            type: array
+                            minItems: 1
+                            maxItems: 50
+                            items:
+                              type: object
+                              required: [name, type]
+                              properties:
+                                name:
+                                  type: string
+                                  pattern: "^[a-z][a-z0-9_]{0,62}$"
+                                # Validate column type against a permissive but bounded grammar:
+                                # base type optionally followed by (n[,m]) or PRIMARY KEY / REFERENCES.
+                                # Blocks injection vectors (semicolons, comments, quotes).
+                                type:
+                                  type: string
+                                  maxLength: 200
+                                  pattern: "^[A-Za-z][A-Za-z0-9_]*(\\([0-9]+(,[0-9]+)?\\))?(\\s+(primary\\s+key|unique|not\\s+null|references\\s+[a-z][a-z0-9_]*(\\([a-z][a-z0-9_]*\\))?))*$"
+            # writeConnectionSecretToRef is required by all XRs with connection
+            # secrets — Crossplane copies the rendered creds to that Secret in
+            # the same namespace as the Claim (for claims) or in the configured
+            # namespace (for cluster-scoped XRs).
+          # status surfaced to consumers.
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+                enum: [Pending, Provisioning, Ready, Failed]
+              endpoint:
+                type: string
+              database:
+                type: string
+              schemaName:
+                type: string
+              tablesCreated:
+                type: integer

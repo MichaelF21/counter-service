@@ -5,6 +5,7 @@ namespace: prod
 
 resources:
   - ../../base
+  - ingest-netpol.yaml   # NetworkPolicy allowing counter-service -> postgres
 
 # Argo CD image-updater rewrites the tag below on every push to main.
 # Local kubectl apply will fall back to ":latest" — only used for dev/test.
@@ -15,7 +16,7 @@ images:
 
 labels:
   - pairs:
-      app.kubernetes.io/version: "0.1.1"
+      app.kubernetes.io/version: "0.2.0"
       app.kubernetes.io/environment: prod
 
 patches:
@@ -25,4 +26,8 @@ patches:
     patch: |-
       - op: replace
         path: /spec/template/metadata/labels/app.kubernetes.io~1version
-        value: "0.1.1"
+        value: "0.2.0"
+  - target:
+      kind: Deployment
+      name: counter-service
+    path: ingest-env-patch.yaml

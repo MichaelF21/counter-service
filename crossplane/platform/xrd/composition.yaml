@@ -1,0 +1,232 @@
+---
+# Composition for XAppDatabase.
+#
+# Pipeline mode (modern Crossplane). Two functions:
+#  1. function-go-templating  — renders the dynamic resources (Database,
+#     Role, Grant, the CREATE-TABLE Job, the table-drop Job, and the
+#     output connection Secret) directly from spec.parameters with full
+#     access to range over spec.parameters.tables.
+#  2. function-auto-ready     — flips the XR to Ready once all composed
+#     resources report Ready.
+#
+# Why not also use function-patch-and-transform?
+#   We could split (P&T for static structure + GT for dynamic SQL), but
+#   keeping everything in one Go template makes the data flow easier to
+#   follow and removes a class of indirection bugs (patches referencing
+#   fields that GT just rendered).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xappdatabase-postgres
+spec:
+  compositeTypeRef:
+    apiVersion: database.platform.example.com/v1alpha1
+    kind: XAppDatabase
+  writeConnectionSecretsToNamespace: crossplane-system
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $database := $xr.spec.parameters.database -}}
+            {{- $schema := default "public" $xr.spec.parameters.schema -}}
+            {{- $tables := $xr.spec.parameters.tables -}}
+            {{- $appUser := printf "%s_app" $database -}}
+            {{- /* K8s resource names can't contain underscores; the Postgres
+                   database name often does. Use $k8sName when stamping K8s
+                   resource names; use $database when referring to the SQL
+                   entity. */ -}}
+            {{- $k8sName := $database | replace "_" "-" -}}
+            {{- /* Stable per-XR password seed.  In real prod use random.Generator;
+                   here we derive from the XR UID so re-renders are deterministic. */ -}}
+            {{- $password := printf "p_%s" (sha256sum (printf "%s-%s" $xr.metadata.uid $database) | trunc 32) -}}
+
+            ---
+            # 1) The logical Postgres database.
+            apiVersion: postgresql.sql.crossplane.io/v1alpha1
+            kind: Database
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: database
+                crossplane.io/external-name: {{ $database | quote }}
+            spec:
+              forProvider: {}
+              providerConfigRef:
+                name: default
+            ---
+            # 2) The application role used by the consuming workload.
+            apiVersion: postgresql.sql.crossplane.io/v1alpha1
+            kind: Role
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: role
+                crossplane.io/external-name: {{ $appUser | quote }}
+            spec:
+              forProvider:
+                privileges:
+                  login: true
+                passwordSecretRef:
+                  namespace: crossplane-system
+                  name: {{ printf "%s-app-password" $k8sName | quote }}
+                  key: password
+              providerConfigRef:
+                name: default
+            ---
+            # 2a) Secret holding the generated app-role password. provider-sql
+            # reads this when creating AND deleting the Role (it observes the
+            # password on every reconcile, including the delete cycle).
+            #
+            # `deletionPolicy: Orphan` is intentional. Without it, Crossplane
+            # would delete this Secret in parallel with the Role MR, and the
+            # Role's deletion would fail with "cannot get password secret".
+            # The orphan persists until a cluster-admin runs the cleanup
+            # snippet at the bottom of crossplane/README.md (or a future
+            # finalizer Job is wired in).
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: role-password
+            spec:
+              deletionPolicy: Orphan
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Secret
+                  type: Opaque
+                  metadata:
+                    name: {{ printf "%s-app-password" $k8sName | quote }}
+                    namespace: crossplane-system
+                    labels:
+                      app.kubernetes.io/managed-by: crossplane
+                      appdatabase: {{ $k8sName | quote }}
+                  stringData:
+                    password: {{ $password | quote }}
+              providerConfigRef:
+                name: default
+            ---
+            # 3) Grants for the app user on the database + schema.
+            apiVersion: postgresql.sql.crossplane.io/v1alpha1
+            kind: Grant
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: grant-connect
+            spec:
+              forProvider:
+                role: {{ $appUser | quote }}
+                database: {{ $database | quote }}
+                privileges: [CONNECT]
+              providerConfigRef:
+                name: default
+            ---
+            # 4) Job that CREATES tables. Runs at provision time.
+            # Uses CREATE TABLE IF NOT EXISTS so re-renders are idempotent.
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: create-tables-job
+            spec:
+              forProvider:
+                manifest:
+                  apiVersion: batch/v1
+                  kind: Job
+                  metadata:
+                    name: {{ printf "create-tables-%s" $k8sName | quote }}
+                    namespace: db
+                  spec:
+                    backoffLimit: 6
+                    template:
+                      metadata:
+                        labels:
+                          app.kubernetes.io/managed-by: crossplane
+                          appdatabase: {{ $database | quote }}
+                          appdatabase-phase: create
+                      spec:
+                        restartPolicy: OnFailure
+                        containers:
+                          - name: psql
+                            image: postgres:16-alpine
+                            env:
+                              - name: PGPASSWORD
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: postgres-superuser
+                                    key: POSTGRES_PASSWORD
+                            command: ["psql"]
+                            args:
+                              - "-v"
+                              - "ON_ERROR_STOP=1"
+                              - "-h"
+                              - "postgres.db.svc.cluster.local"
+                              - "-U"
+                              - "postgres"
+                              - "-d"
+                              - {{ $database | quote }}
+                              - "-c"
+                              - |
+                                {{- if ne $schema "public" }}
+                                CREATE SCHEMA IF NOT EXISTS "{{ $schema }}";
+                                {{- end }}
+                                GRANT USAGE ON SCHEMA "{{ $schema }}" TO "{{ $appUser }}";
+                                {{- range $t := $tables }}
+                                CREATE TABLE IF NOT EXISTS "{{ $schema }}"."{{ $t.name }}" (
+                                  {{- range $i, $c := $t.columns }}
+                                  {{ if $i }},{{ end }}"{{ $c.name }}" {{ $c.type }}
+                                  {{- end }}
+                                );
+                                GRANT SELECT, INSERT, UPDATE, DELETE ON "{{ $schema }}"."{{ $t.name }}" TO "{{ $appUser }}";
+                                {{- end }}
+                                GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{{ $schema }}" TO "{{ $appUser }}";
+              providerConfigRef:
+                name: default
+            ---
+            # 5) Connection Secret published to whoever consumes the XR.
+            # XR-level writeConnectionSecretToRef points here; Crossplane
+            # forwards the keys to the consumer's namespace.
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: conn-secret
+                crossplane.io/composition-resource-name: conn-secret
+            spec:
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Secret
+                  type: Opaque
+                  metadata:
+                    name: {{ printf "%s-conn" $k8sName | quote }}
+                    namespace: crossplane-system
+                  stringData:
+                    host: postgres.db.svc.cluster.local
+                    port: "5432"
+                    database: {{ $database | quote }}
+                    schema: {{ $schema | quote }}
+                    username: {{ $appUser | quote }}
+                    password: {{ $password | quote }}
+                    dsn: {{ printf "postgresql://%s:%s@postgres.db.svc.cluster.local:5432/%s?sslmode=disable" $appUser $password $database | quote }}
+              providerConfigRef:
+                name: default
+            ---
+            # 6) Patch the XR status so consumers can read endpoint/db/etc.
+            apiVersion: meta.gotemplating.fn.crossplane.io/v1alpha1
+            kind: CompositeConnectionDetails
+            data:
+              host: {{ "postgres.db.svc.cluster.local" | b64enc }}
+              port: {{ "5432" | b64enc }}
+              database: {{ $database | b64enc }}
+              schema: {{ $schema | b64enc }}
+              username: {{ $appUser | b64enc }}
+              password: {{ $password | b64enc }}
+    - step: ready
+      functionRef:
+        name: function-auto-ready

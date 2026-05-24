@@ -1,0 +1,26 @@
+---
+# Two-table XAppDatabase mirroring the assignment's example (users + orders
+# with a foreign-key reference).
+apiVersion: database.platform.example.com/v1alpha1
+kind: XAppDatabase
+metadata:
+  name: orders-db
+spec:
+  parameters:
+    database: app_orders
+    schema: public
+    tables:
+      - name: users
+        columns:
+          - { name: id,          type: "serial primary key" }
+          - { name: email,       type: "varchar(255) not null unique" }
+          - { name: created_at,  type: "timestamp not null" }
+      - name: orders
+        columns:
+          - { name: id,          type: "serial primary key" }
+          - { name: user_id,     type: "int references users" }
+          - { name: total,       type: "numeric(10,2) not null" }
+          - { name: created_at,  type: "timestamp not null" }
+  writeConnectionSecretToRef:
+    name: orders-db-conn
+    namespace: default

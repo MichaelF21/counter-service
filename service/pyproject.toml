@@ -14,6 +14,10 @@ dependencies = [
     "pydantic-settings==2.7.0",
     "python-json-logger==3.2.1",
     "prometheus-client==0.21.1",
+    # asyncpg drives the optional /ingest endpoint that writes into the
+    # Crossplane-provisioned Postgres table. Lazy: only initialised if
+    # COUNTER_INGEST_ENABLED=true.
+    "asyncpg==0.30.0",
     # async-timeout only needed for Python <3.11.3 where redis-py imports it
     # unconditionally; with 3.13 we can drop it.
 ]
