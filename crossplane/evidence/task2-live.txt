@@ -1,0 +1,55 @@
+=== Task 2 live evidence ===
+
+Live URL: http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+
+=== xappdatabases ===
+NAME           SYNCED   READY   COMPOSITION             AGE
+counter-data   True     True    xappdatabase-postgres   24m
+
+=== composed MRs ===
+NAME                                                       READY   SYNCED   AGE
+database.postgresql.sql.crossplane.io/counter-data-xt4vs   True    True     24m
+
+NAME                                                   READY   SYNCED   CONN LIMIT   PRIVILEGES
+role.postgresql.sql.crossplane.io/counter-data-95qzd   True    True     -1           ["NOSUPERUSER","INHERIT","NOCREATEDB","NOCREATEROLE","LOGIN","NOREPLICATION","NOBYPASSRLS"]
+
+NAME                                                    READY   SYNCED   AGE   ROLE               MEMBER OF   DATABASE       PRIVILEGES
+grant.postgresql.sql.crossplane.io/counter-data-xtfcd   True    True     24m   counter_data_app               counter_data   ["CONNECT"]
+
+NAME                                                 KIND     PROVIDERCONFIG   SYNCED   READY   AGE
+object.kubernetes.crossplane.io/counter-data-5lrv8   Job      default          True     True    24m
+object.kubernetes.crossplane.io/counter-data-7gvjf   Secret   default          True     True    24m
+object.kubernetes.crossplane.io/counter-data-c6snl   Secret   default          True     True    24m
+
+=== databases in Postgres ===
+ counter_data | postgres | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =Tc/postgres               +
+              |          |          |                 |            |            |            |           | counter_data_app=c/postgres
+
+=== tables in counter_data ===
+         List of relations
+ Schema |  Name  | Type  |  Owner   
+--------+--------+-------+----------
+ public | events | table | postgres
+(1 row)
+
+
+=== conn Secret in prod (keys only, values redacted) ===
+  database
+  host
+  password
+  port
+  schema
+  username
+
+=== /ingest smoke ===
+POST /ingest {date:2026-05-24, counter_values:42, restart_count:3}
+ingested
+
+Rows in events table after ingest:
+ id |        date         | counter_values | restart_count 
+----+---------------------+----------------+---------------
+  1 | 2026-05-24 00:00:00 |             42 |             3
+  2 | 2026-05-25 00:00:00 |            100 |             4
+  3 | 2026-05-24 00:00:00 |             42 |             3
+(3 rows)
+
