@@ -10,21 +10,11 @@ resource "aws_kms_alias" "eks_secrets" {
   target_key_id = aws_kms_key.eks_secrets.key_id
 }
 
-resource "aws_kms_key" "ebs" {
-  description             = "KMS CMK for EBS volume encryption."
-  enable_key_rotation     = true
-  deletion_window_in_days = 30
-  # Policy lives in policies/ebs-kms-key.json.tpl. A customer-managed key
-  # blocks the AWS Auto Scaling service-linked role by default; the template
-  # restores the minimum grants AWS documents for ASG + EC2 EBS encryption.
-  policy = templatefile("${path.module}/policies/ebs-kms-key.json.tpl", {
-    account_id = local.account_id
-    partition  = local.partition
-  })
-  tags = var.tags
-}
-
-resource "aws_kms_alias" "ebs" {
-  name          = "alias/${var.cluster_name}-ebs"
-  target_key_id = aws_kms_key.ebs.key_id
-}
+# NOTE: A project-scoped EBS CMK was previously declared here. Using it from
+# the EBS CSI driver requires granting both the AutoScaling SLR AND the CSI
+# driver's IRSA role on the key policy — substantially more setup than the
+# encryption-at-rest requirement actually needs. The gp3 StorageClass now
+# uses the AWS-managed `aws/ebs` key (still encrypted at rest, just without
+# per-project audit isolation). If/when stronger key isolation is needed,
+# bring back the resource + grant the CSI IRSA role + reference its ARN in
+# the StorageClass `parameters.kmsKeyId`.

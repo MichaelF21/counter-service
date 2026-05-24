@@ -41,3 +41,14 @@ spec:
         factor: 2
         maxDuration: 5m
   revisionHistoryLimit: 10
+  # Kustomize stamps `app.kubernetes.io/version` onto every resource including
+  # the StatefulSet's `volumeClaimTemplates[].metadata.labels`. Kubernetes
+  # rejects any update to `volumeClaimTemplates` on a live StatefulSet, so
+  # ArgoCD's reconcile would be stuck OutOfSync forever after the first label
+  # bump. Telling ArgoCD to ignore that specific JSONPath closes the diff.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      name: counter-redis
+      jsonPointers:
+        - /spec/volumeClaimTemplates

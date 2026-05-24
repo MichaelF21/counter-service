@@ -31,12 +31,12 @@ Fork of [shainberg/counter-service](https://github.com/shainberg/counter-service
 counter-service/
 ├── service/                  # Python app: FastAPI + Redis backend
 │   ├── app/                  #   source
-│   ├── tests/                #   pytest suite (16 tests, 92% cov)
+│   ├── tests/                #   pytest suite (24 tests, 100% cov)
 │   ├── Dockerfile            #   multi-stage; distroless runtime (~168 MB)
 │   └── pyproject.toml        #   deps + ruff + mypy + pytest config
 ├── infra/                    # Terraform
-│   ├── bootstrap/            #   one-shot: S3 + DynamoDB state backend
-│   └── envs/prod/            #   VPC, EKS, ECR, IAM, Helm add-ons
+│   ├── bootstrap/            #   one-shot: KMS-encrypted versioned S3 state bucket
+│   └── envs/prod/            #   VPC, EKS, ECR, IAM (JSON-templated), Helm add-ons
 ├── deploy/                   # Kustomize manifests
 │   ├── base/                 #   Deployment, Service, Ingress, HPA, PDB,
 │   │   └── redis/            #   NetworkPolicies, ServiceMonitor, Redis
@@ -98,11 +98,11 @@ working stack.
 | Tool       | Version (tested) | Install                                      |
 |------------|------------------|----------------------------------------------|
 | AWS CLI v2 | 2.34+            | `winget install Amazon.AWSCLI`               |
-| Terraform  | 1.9+             | `winget install Hashicorp.Terraform`         |
+| Terraform  | 1.10+            | `winget install Hashicorp.Terraform`         |
 | kubectl    | 1.34+            | bundled with Docker Desktop / `winget`       |
-| Helm       | 4.1+             | `winget install Helm.Helm`                   |
+| Helm       | 3.16+            | `winget install Helm.Helm`                   |
 | eksctl     | 0.226+           | `winget install eksctl.eksctl` (optional)    |
-| Python     | 3.11             | `winget install Python.Python.3.11`          |
+| Python     | 3.11+            | `winget install Python.Python.3.11`          |
 | Docker     | 29+              | Docker Desktop                               |
 | gh         | 2.92+            | `winget install GitHub.cli`                  |
 
@@ -121,13 +121,14 @@ cd infra/bootstrap
 terraform init
 terraform apply \
   -var "state_bucket_name=counter-service-tfstate-<your-suffix>"
-# Outputs: state_bucket, lock_table, kms_key_arn — save them.
+# Outputs: state_bucket, kms_key_arn — save them.
 ```
 
 This is the **only** Terraform apply you run by hand. It creates the
-KMS-encrypted, versioned S3 bucket and the DynamoDB lock table that the rest of
-the IaC will use. From this point on the `terraform` workflow in GitHub Actions
-takes over.
+KMS-encrypted, versioned S3 bucket that the rest of the IaC will use as its
+remote backend. State locking is handled by S3 itself (Terraform 1.10+
+`use_lockfile = true`), no DynamoDB table needed. From this point on the
+`terraform` workflow in GitHub Actions takes over.
 
 ### 3. Configure GitHub repository secrets
 
@@ -154,18 +155,18 @@ Or locally for the first run:
 ```bash
 cd infra/envs/prod
 terraform init \
-  -backend-config="bucket=<state_bucket from step 2>" \
-  -backend-config="dynamodb_table=<lock_table from step 2>"
+  -backend-config="bucket=<state_bucket from step 2>"
 terraform apply
 ```
 
 This provisions, in eu-west-2:
 
 - VPC across 3 AZs, with private subnets + single NAT (cost-trim, document trade-off below)
-- EKS 1.31 cluster, **`support_type = STANDARD`** (assignment hard requirement)
-  - Managed node group: 2 × `t3.medium` (min 2, max 6), encrypted gp3 EBS, KMS CMK
-  - Secret-at-rest encrypted with project-scoped KMS CMK
+- EKS 1.34 cluster, **`support_type = STANDARD`** (assignment hard requirement)
+  - Managed node group: 2 × `t3.medium` (min 2, max 6), gp3 EBS volumes encrypted with the AWS-managed `aws/ebs` key
+  - Secret-at-rest encrypted with a project-scoped KMS CMK
   - IRSA enabled, OIDC provider exposed
+  - Two EKS access entries (bootstrap operator + GitHub Actions OIDC role) for kubectl/Helm access
   - Add-ons: CoreDNS, kube-proxy, VPC-CNI (network-policy enforcement on), EBS CSI
 - ECR repo `counter-service-prod` (the bare `counter-service` name was already taken in this shared account) — KMS-encrypted, immutable tags, scan-on-push, 30-image retention
 - Cluster add-ons via Helm:
@@ -267,9 +268,14 @@ kubectl logs -n prod -l app.kubernetes.io/name=counter-service | jq .
 
 - **AWS access from CI** — GitHub Actions uses OIDC against the
   `counter-service-prod-gha-ci` IAM role. No long-lived access keys live in GH.
-  The role is locked down to ECR push/pull on the counter-service repo and is
-  scoped via the OIDC sub claim to `MichaelF21/counter-service` on `main`,
-  `pull_request`, and `environment:prod` contexts only.
+  The role is scoped via the OIDC sub claim to `MichaelF21/counter-service`
+  on `main`, `pull_request`, and `environment:prod` contexts only. Permissions:
+  inline policy grants ECR push/pull on the counter-service-prod repo + R/W on
+  the TF state bucket + KMS for state; `AdministratorAccess` is attached on top
+  so the same role can run full terraform plan/apply across the stack. In real
+  prod this would be tightened to PowerUserAccess + an inline IAM policy
+  scoped to `counter-service-*` (left as a documented follow-up to avoid mid-
+  apply CI lockout).
 - **Application secrets** — managed via External Secrets Operator. ESO has IRSA
   permissions to read secrets under `counter-service/*` in AWS Secrets Manager
   only. To add a secret:
@@ -277,8 +283,9 @@ kubectl logs -n prod -l app.kubernetes.io/name=counter-service | jq .
   aws secretsmanager create-secret --name counter-service/foo --secret-string ...
   # ExternalSecret CR in deploy/base/external-secrets/ syncs it into prod ns.
   ```
-- **Terraform state** — encrypted at rest with project-scoped KMS CMK, S3
-  versioning + 90-day non-current expiration, DynamoDB lock table with PITR.
+- **Terraform state** — encrypted at rest with a project-scoped KMS CMK, S3
+  versioning + 90-day non-current expiration. State locking via S3 conditional
+  writes (`use_lockfile = true`, Terraform 1.10+) — no DynamoDB table needed.
 - **TLS to ALB** — currently HTTP only (assignment specifies port 80). In real
   prod, add ACM cert + HTTPS listener annotations on the Ingress.
 - **Kubeconfig & local state** — `.gitignore` excludes `kubeconfig*`, `*.csv`,
@@ -342,12 +349,12 @@ Why Redis won: meets the HA/multi-replica requirement, atomic increments via `IN
 
 ### Security posture
 
-- **Container**: distroless base (no shell, no apt, ~168 MB), non-root UID 65532, `readOnlyRootFilesystem`, all caps dropped, `seccompProfile: RuntimeDefault`, no service-account token mounted.
+- **Container**: distroless base (no shell, no apt, ~168 MB), non-root UID 65532, `readOnlyRootFilesystem`, all caps dropped, `seccompProfile: RuntimeDefault`, no service-account token mounted. Build-only deps (pip, setuptools, wheel) are stripped from the runtime venv to remove transitive CVEs.
 - **Namespace**: `pod-security.kubernetes.io/enforce: restricted` — any future workload here must meet the same bar.
-- **Network**: default-deny ingress; only ALB and Prometheus can reach :8080. Egress restricted to Redis + DNS.
-- **Image registry**: immutable ECR tags + scan-on-push, KMS-encrypted; Trivy gate blocks merges on HIGH/CRITICAL CVEs.
-- **State**: all storage encrypted with project-scoped KMS CMKs (EBS, EKS secrets, ECR, S3 state, DynamoDB).
-- **IAM**: GH OIDC + IRSA, no long-lived keys anywhere. Each component has a scoped role.
+- **Network**: default-deny ingress in `prod` ns; per-pod allowlists open only the paths the workloads actually need (ALB+Prometheus → counter-service:8080; counter-service → counter-redis:6379; counter-service → kube-dns).
+- **Image registry**: immutable ECR tags + scan-on-push, KMS-encrypted with project CMK; Trivy gate in CI prints HIGH/CRITICAL findings.
+- **State**: EKS secrets + ECR + S3 state encrypted with project-scoped KMS CMKs. EBS volumes (node root disks and Redis PVC) use the AWS-managed `aws/ebs` key — the CSI driver requires a customer-managed key policy that grants both the AutoScaling SLR and the CSI IRSA role, which is more setup than the encryption-at-rest requirement actually needs.
+- **IAM**: GH OIDC + IRSA, no long-lived keys anywhere. IRSA roles for AWS LBC, ESO, Cluster Autoscaler, EBS CSI, ArgoCD image-updater — each scoped to the minimum AWS API surface. All IAM trust + permissions policies live as `.json.tpl` files under `infra/envs/prod/policies/`, rendered via `templatefile()`.
 - **Secrets**: AWS Secrets Manager → ESO → K8s Secret; nothing in git.
 
 ---

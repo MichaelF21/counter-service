@@ -1,7 +1,7 @@
 ###############################################################################
 # Stage 1: builder — install deps into a venv we'll copy into the runtime image.
 ###############################################################################
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -15,17 +15,21 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY pyproject.toml ./
 COPY app ./app
 
-RUN pip install --upgrade pip && pip install .
+RUN pip install --upgrade pip && pip install . \
+    # Strip build-only deps from the venv — these aren't needed to run the
+    # service and they're what Trivy was flagging for HIGH CVEs (jaraco.context,
+    # wheel, setuptools transitives). The runtime image is leaner too.
+    && pip uninstall -y pip setuptools wheel
 
 ###############################################################################
 # Stage 2: runtime — distroless python, non-root, no shell or package manager.
 ###############################################################################
-FROM gcr.io/distroless/python3-debian12:nonroot AS runtime
+FROM gcr.io/distroless/python3-debian13:nonroot AS runtime
 
 ARG APP_VERSION=0.0.0-dev
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/opt/venv/lib/python3.11/site-packages \
+    PYTHONPATH=/opt/venv/lib/python3.13/site-packages \
     COUNTER_APP_VERSION=${APP_VERSION}
 
 COPY --from=builder /opt/venv /opt/venv
