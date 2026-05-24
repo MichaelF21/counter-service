@@ -1,25 +1,41 @@
-=== Live URL ===
-http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+=== Live ALB session — captured 2026-05-24T20:23Z ===
 
-=== curl session ===
+Live URL: http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
+
 $ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
-counter-service v0.1.0 count: 2
+counter-service v0.2.0
+count: 39
 
 $ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
-count: 3
+count: 40
 $ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
-count: 4
+count: 41
 $ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
-count: 5
+count: 42
+
 $ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
-counter-service v0.1.0 count: 5
+counter-service v0.2.0
+count: 42
 
 $ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/healthz
 ok
 $ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/readyz
 ready
 $ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/version
-0.1.0
+0.2.0
 
-=== /metrics excerpt ===
-counter_http_requests_total{endpoint="/healthz",method="GET",status="200"} 42.0 counter_http_requests_total{endpoint="/readyz",method="GET",status="200"} 27.0 counter_http_requests_total{endpoint="/metrics",method="GET",status="200"} 5.0 counter_http_requests_total{endpoint="/",method="POST",status="201"} 3.0 counter_http_requests_total{endpoint="/",method="GET",status="200"} 1.0 counter_http_requests_total{endpoint="/version",method="GET",status="200"} 1.0 counter_http_requests_created{endpoint="/healthz",method="GET",status="200"} 1.7795421562654672e+09 counter_http_requests_created{endpoint="/readyz",method="GET",status="200"} 1.7795421566811142e+09
+$ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/ingest -H 'content-type: application/json' \
+    -d '{"date":"2026-05-24","counter_values":42,"restart_count":3}'
+ingested
+
+$ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/metrics | head -10
+# HELP counter_http_requests_total HTTP requests served by the counter service.
+# TYPE counter_http_requests_total counter
+counter_http_requests_total{endpoint="/healthz",method="GET",status="200"} 1459.0
+counter_http_requests_total{endpoint="/readyz",method="GET",status="200"} 972.0
+counter_http_requests_total{endpoint="/metrics",method="GET",status="200"} 162.0
+counter_http_requests_total{endpoint="/",method="GET",status="200"} 5.0
+counter_http_requests_total{endpoint="/ingest",method="POST",status="201"} 2.0
+counter_http_requests_total{endpoint="/",method="POST",status="201"} 2.0
+counter_http_requests_total{endpoint="/login",method="GET",status="404"} 2.0
+# HELP counter_http_requests_created HTTP requests served by the counter service.

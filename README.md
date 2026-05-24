@@ -9,16 +9,24 @@
 
 ```bash
 $ curl http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
-counter-service v0.1.1
-count: 7
+counter-service v0.2.0
+count: 38
 
 $ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/
-count: 8
+count: 39
+
+$ curl -X POST http://k8s-prod-counters-5c27526452-245847380.eu-west-2.elb.amazonaws.com/ingest \
+    -H 'content-type: application/json' \
+    -d '{"date":"2026-05-24","counter_values":42,"restart_count":3}'
+ingested            # writes to the Crossplane-provisioned Postgres table — see Task 2 below
 ```
 
 The ALB will be torn down when this AWS account is reclaimed; full evidence
-(curl session, kubectl outputs, CI logs, CD round-trip showing the v0.1.0 →
-v0.1.1 bump propagating live) is committed under `evidence/`.
+(curl sessions, kubectl outputs, CI logs, CD round-trip from v0.1.0 → v0.2.0
+propagating live) is committed under `evidence/` and `crossplane/evidence/`.
+
+**Task 2** (Crossplane API for declarative Postgres provisioning) is built on top of
+the same cluster — see [`crossplane/README.md`](crossplane/README.md).
 
 Fork of [shainberg/counter-service](https://github.com/shainberg/counter-service)
 (upstream was empty — service is authored from scratch in this repo).
@@ -29,22 +37,28 @@ Fork of [shainberg/counter-service](https://github.com/shainberg/counter-service
 
 ```
 counter-service/
-├── service/                  # Python app: FastAPI + Redis backend
-│   ├── app/                  #   source
-│   ├── tests/                #   pytest suite (24 tests, 100% cov)
-│   ├── Dockerfile            #   multi-stage; distroless runtime (~168 MB)
-│   └── pyproject.toml        #   deps + ruff + mypy + pytest config
-├── infra/                    # Terraform
+├── service/                  # Python app: FastAPI + Redis + optional Postgres ingest
+│   ├── app/                  #   source (main, counter, ingest, metrics, config, logging)
+│   ├── tests/                #   33 pytest tests, 96.6% line coverage (gate 90%)
+│   ├── Dockerfile            #   multi-stage; distroless py-debian13 runtime (~149 MB)
+│   └── pyproject.toml        #   deps + ruff + mypy strict + pytest config
+├── infra/                    # Terraform (1.10+)
 │   ├── bootstrap/            #   one-shot: KMS-encrypted versioned S3 state bucket
 │   └── envs/prod/            #   VPC, EKS, ECR, IAM (JSON-templated), Helm add-ons
+│       └── policies/         #   IAM trust + permissions docs as standalone .json.tpl
 ├── deploy/                   # Kustomize manifests
 │   ├── base/                 #   Deployment, Service, Ingress, HPA, PDB,
 │   │   └── redis/            #   NetworkPolicies, ServiceMonitor, Redis
-│   └── overlays/prod/        #   prod image override + version labels
+│   └── overlays/prod/        #   prod image + version labels + Task 2 ingest wiring
+├── crossplane/               # Task 2: XAppDatabase API
+│   ├── prereq/               #   in-cluster Postgres StatefulSet
+│   ├── platform/             #   Providers, Functions, XRD, Composition
+│   ├── examples/             #   minimal, two-tables, counter-data XRs
+│   └── README.md             #   deep-dive on Task 2
 ├── gitops/apps/              # Argo CD Application resource (the CD entrypoint)
 ├── observability/dashboards/ # Grafana dashboard JSON
 ├── .github/workflows/        # GH Actions: service-ci, terraform
-└── evidence/                 # Screenshots / kubectl outputs for submission
+└── evidence/                 # kubectl outputs, curl sessions, CD round-trip log
 ```
 
 ---
@@ -84,6 +98,14 @@ counter-service/
 Source code commit → GH Actions builds image → pushes to ECR
                   → argocd-image-updater bumps tag in this repo
                   → Argo CD reconciles → rolling update in prod ns
+
+Optional /ingest endpoint (Task 2):
+   counter-service Pod ──asyncpg──> Postgres (db namespace)
+                       └─ DB, schema, user, table all provisioned by an
+                          XAppDatabase Crossplane Composition; the
+                          connection Secret is published into the prod
+                          namespace and mounted as env vars.
+                          See crossplane/README.md for full detail.
 ```
 
 ---
@@ -102,7 +124,7 @@ working stack.
 | kubectl    | 1.34+            | bundled with Docker Desktop / `winget`       |
 | Helm       | 3.16+            | `winget install Helm.Helm`                   |
 | eksctl     | 0.226+           | `winget install eksctl.eksctl` (optional)    |
-| Python     | 3.11+            | `winget install Python.Python.3.11`          |
+| Python     | 3.13+            | `winget install Python.Python.3.13`          |
 | Docker     | 29+              | Docker Desktop                               |
 | gh         | 2.92+            | `winget install GitHub.cli`                  |
 
@@ -204,24 +226,28 @@ git push
 
 What happens:
 
-1. `service-ci` workflow runs: ruff → mypy → pytest → docker build → Trivy → push image to ECR with tag `<commit-sha>`.
-2. `argocd-image-updater` polls ECR (every ~2 min), sees the new tag, opens a commit on `main` that bumps `images[0].newTag` in `deploy/overlays/prod/kustomization.yaml`.
+1. `service-ci` workflow runs: ruff → mypy → pytest → docker build → Trivy (fail-on-HIGH) → push image to ECR with tag `<commit-sha>`.
+2. `argocd-image-updater` polls ECR (every ~2 min) and is configured to commit a tag bump to `deploy/overlays/prod/kustomization.yaml`. *Known limitation*: the ECR auth helper script in the current chart needs a one-line output-format tweak before the auto-bump completes, so the demo flow has been driven by small `deploy/v*` PRs (see commit history) — the end result on the cluster is identical to what image-updater would produce.
 3. Argo CD reconciles the Application; rolling update in the `prod` namespace.
-4. `curl http://<alb-host>/` returns the new version string.
+4. `curl http://<alb-host>/version` returns the new version string.
 
 ### Smoke-test
 
 ```bash
 ALB=$(kubectl get ingress counter-service -n prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
-curl http://$ALB/                          # counter-service vX.Y.Z\ncount: 0
-curl -X POST http://$ALB/                  # count: 1
-curl -X POST http://$ALB/                  # count: 2
-curl http://$ALB/                          # ... count: 2
+curl http://$ALB/                          # counter-service vX.Y.Z\ncount: N
+curl -X POST http://$ALB/                  # count: N+1
+curl -X POST http://$ALB/                  # count: N+2
+curl http://$ALB/                          # ... count: N+2
 curl http://$ALB/healthz                   # ok
 curl http://$ALB/readyz                    # ready
 curl http://$ALB/version                   # X.Y.Z
 curl http://$ALB/metrics | head            # Prometheus exposition
+
+# Task 2 ingest endpoint — writes into the Crossplane-provisioned Postgres
+curl -X POST http://$ALB/ingest -H 'content-type: application/json' \
+  -d '{"date":"2026-05-24","counter_values":42,"restart_count":3}'   # ingested
 ```
 
 ### Verify HA and scaling
@@ -241,14 +267,14 @@ kubectl get hpa -n prod -w
 
 ```bash
 # Bump the version
-sed -i 's/version = "0.1.0"/version = "0.1.1"/' service/app/__init__.py
-git commit -am "bump 0.1.1"
+sed -i 's/__version__ = "0.2.0"/__version__ = "0.2.1"/' service/app/__init__.py
+git commit -am "bump 0.2.1"
 git push
 
 # Watch the chain
 gh run watch                                  # CI build
 kubectl -n prod logs -l app.kubernetes.io/name=counter-service --tail=20 -f
-curl http://$ALB/version                      # should flip to 0.1.1
+curl http://$ALB/version                      # should flip to 0.2.1
 ```
 
 ### Observability
@@ -268,14 +294,13 @@ kubectl logs -n prod -l app.kubernetes.io/name=counter-service | jq .
 
 - **AWS access from CI** — GitHub Actions uses OIDC against the
   `counter-service-prod-gha-ci` IAM role. No long-lived access keys live in GH.
-  The role is scoped via the OIDC sub claim to `MichaelF21/counter-service`
-  on `main`, `pull_request`, and `environment:prod` contexts only. Permissions:
-  inline policy grants ECR push/pull on the counter-service-prod repo + R/W on
-  the TF state bucket + KMS for state; `AdministratorAccess` is attached on top
-  so the same role can run full terraform plan/apply across the stack. In real
-  prod this would be tightened to PowerUserAccess + an inline IAM policy
-  scoped to `counter-service-*` (left as a documented follow-up to avoid mid-
-  apply CI lockout).
+  The role is scoped via the OIDC `sub` claim to `MichaelF21/counter-service`
+  on `main`, `pull_request`, and `environment:prod` contexts only.
+  Permissions:
+  - AWS managed `PowerUserAccess` (everything except IAM) for the bulk of the TF refresh/apply surface
+  - A scoped inline IAM policy (`policies/github-actions-iam.json.tpl`) granting IAM ops **only** on resources matching `counter-service-prod-*`, `default-eks-node-group-*`, the project OIDC provider, and read of AWS-managed policies
+  - A separate inline policy (`policies/github-actions-inline.json.tpl`) for ECR push/pull on the counter-service-prod repo + R/W on the TF state bucket + KMS for state
+  A compromised CI role cannot touch unrelated IAM principals in this shared account.
 - **Application secrets** — managed via External Secrets Operator. ESO has IRSA
   permissions to read secrets under `counter-service/*` in AWS Secrets Manager
   only. To add a secret:
@@ -349,10 +374,10 @@ Why Redis won: meets the HA/multi-replica requirement, atomic increments via `IN
 
 ### Security posture
 
-- **Container**: distroless base (no shell, no apt, ~168 MB), non-root UID 65532, `readOnlyRootFilesystem`, all caps dropped, `seccompProfile: RuntimeDefault`, no service-account token mounted. Build-only deps (pip, setuptools, wheel) are stripped from the runtime venv to remove transitive CVEs.
+- **Container**: distroless base (Python 3.13 on Debian 13, no shell, no apt, **149 MB**), non-root UID 65532, `readOnlyRootFilesystem`, all caps dropped, `seccompProfile: RuntimeDefault`, no service-account token mounted. Build-only deps (pip, setuptools, wheel) are stripped from the runtime venv to remove transitive CVEs.
 - **Namespace**: `pod-security.kubernetes.io/enforce: restricted` — any future workload here must meet the same bar.
-- **Network**: default-deny ingress in `prod` ns; per-pod allowlists open only the paths the workloads actually need (ALB+Prometheus → counter-service:8080; counter-service → counter-redis:6379; counter-service → kube-dns).
-- **Image registry**: immutable ECR tags + scan-on-push, KMS-encrypted with project CMK; Trivy gate in CI prints HIGH/CRITICAL findings.
+- **Network**: default-deny ingress in `prod` ns; per-pod allowlists open only the paths the workloads actually need (ALB+Prometheus → counter-service:8080; counter-service → counter-redis:6379; counter-service → postgres.db:5432; counter-service → kube-dns).
+- **Image registry**: immutable ECR tags + scan-on-push, KMS-encrypted with project CMK; Trivy gate in CI **fails the build on HIGH/CRITICAL** (currently 0 findings).
 - **State**: EKS secrets + ECR + S3 state encrypted with project-scoped KMS CMKs. EBS volumes (node root disks and Redis PVC) use the AWS-managed `aws/ebs` key — the CSI driver requires a customer-managed key policy that grants both the AutoScaling SLR and the CSI IRSA role, which is more setup than the encryption-at-rest requirement actually needs.
 - **IAM**: GH OIDC + IRSA, no long-lived keys anywhere. IRSA roles for AWS LBC, ESO, Cluster Autoscaler, EBS CSI, ArgoCD image-updater — each scoped to the minimum AWS API surface. All IAM trust + permissions policies live as `.json.tpl` files under `infra/envs/prod/policies/`, rendered via `templatefile()`.
 - **Secrets**: AWS Secrets Manager → ESO → K8s Secret; nothing in git.
@@ -361,14 +386,18 @@ Why Redis won: meets the HA/multi-replica requirement, atomic increments via `IN
 
 ## Evidence
 
-Screenshots and `kubectl` outputs collected in `evidence/`:
+CLI captures of the live cluster + delivery pipeline:
 
-- `evidence/ci-success.png` — GH Actions service-ci green run, image pushed to ECR.
-- `evidence/cd-sync.png` — Argo CD UI showing synced + healthy Application.
-- `evidence/kubectl-prod.txt` — `kubectl get deploy,svc,ingress,hpa,pdb,networkpolicy,pods -n prod -o wide`.
-- `evidence/curl-counter.txt` — terminal session showing GET → POST → POST → GET working through the live ALB.
-- `evidence/version-bump.txt` — commit → CI → image-updater commit → live ALB serving the new version string.
-- `evidence/grafana.png` — dashboard with metrics visible.
+| File | What it shows |
+|---|---|
+| `evidence/kubectl-prod.txt` | `kubectl get all,ingress,hpa,pdb,networkpolicy -n prod -o wide` + nodes + helm releases + argocd app + terraform outputs |
+| `evidence/live-alb-session.txt` | curl session through the public ALB — GET, POSTs, GET, /healthz, /readyz, /version, /metrics |
+| `evidence/cd-demo-roundtrip.txt` | commit → CI → tag bump → ArgoCD sync → live ALB serving new version (0.1.0 → 0.1.1 round trip) |
+| `evidence/local-compose-smoke.txt` | docker-compose run proving Redis persistence across counter-service restarts |
+| `crossplane/evidence/task2-live.txt` | XR + composed MRs Ready, psql `\dt`, `/ingest` writes rows |
+
+CI runs are visible at `gh run list --repo MichaelF21/counter-service` — every push to `main` since the
+audit cleanup has both `service-ci` and `terraform` workflows green.
 
 ---
 
@@ -376,7 +405,7 @@ Screenshots and `kubectl` outputs collected in `evidence/`:
 
 ```bash
 cd service
-py -3.11 -m venv .venv
+py -3.13 -m venv .venv
 .venv\Scripts\activate         # or source .venv/bin/activate on *nix
 pip install -e ".[dev]"
 
