@@ -1,0 +1,54 @@
+---
+# Secret holding the DSN that provider-sql will use to talk to Postgres.
+# Lives in crossplane-system so the provider's pod can read it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-dsn
+  namespace: crossplane-system
+type: Opaque
+stringData:
+  # provider-sql/postgresql expects four discrete keys: endpoint, port, username, password.
+  # (No PGSSLMODE/sslmode key — pinning sslDisabled below in the ProviderConfig.)
+  endpoint: postgres.db.svc.cluster.local
+  port: "5432"
+  username: postgres
+  password: ChangeMe-counterDemoSuperPass-2026
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  defaultDatabase: postgres
+  sslMode: disable   # in-cluster traffic; pod-to-pod TLS would need extra setup.
+  credentials:
+    source: PostgreSQLConnectionSecret
+    connectionSecretRef:
+      namespace: crossplane-system
+      name: postgres-dsn
+---
+# provider-kubernetes uses the in-cluster service account by default; bind
+# its ServiceAccount to cluster-admin so it can create/delete Jobs, Secrets,
+# RoleBindings on behalf of the Composition.
+# In real prod this would be a narrower role enumerating the verbs it needs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: provider-kubernetes-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: provider-kubernetes
+    namespace: crossplane-system
+---
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: InjectedIdentity

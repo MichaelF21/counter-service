@@ -1,0 +1,24 @@
+---
+# Allow counter-service pods to reach Postgres (in the db namespace) on 5432.
+# Default-deny-egress isn't in force, but the existing counter-service-egress
+# policy is whitelist-only, so this is required for ingest to work.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: counter-service-egress-postgres
+  namespace: prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: counter-service
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: db
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - { protocol: TCP, port: 5432 }

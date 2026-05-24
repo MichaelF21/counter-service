@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: counter-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: counter-service
+          env:
+            # Existing env entries from the base manifest are preserved
+            # because strategic-merge merges lists by `name` (a standard
+            # K8s patch directive for `env`). Below entries get appended.
+            - { name: COUNTER_INGEST_ENABLED, value: "true" }
+            - { name: COUNTER_PG_TABLE, value: events }
+            - name: COUNTER_PG_HOST
+              valueFrom: { secretKeyRef: { name: counter-data-conn, key: host } }
+            - name: COUNTER_PG_PORT
+              valueFrom: { secretKeyRef: { name: counter-data-conn, key: port } }
+            - name: COUNTER_PG_DATABASE
+              valueFrom: { secretKeyRef: { name: counter-data-conn, key: database } }
+            - name: COUNTER_PG_SCHEMA
+              valueFrom: { secretKeyRef: { name: counter-data-conn, key: schema } }
+            - name: COUNTER_PG_USERNAME
+              valueFrom: { secretKeyRef: { name: counter-data-conn, key: username } }
+            - name: COUNTER_PG_PASSWORD
+              valueFrom: { secretKeyRef: { name: counter-data-conn, key: password } }

@@ -10,6 +10,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from app import __version__
 from app.config import Settings, get_settings
 from app.counter import CounterRepository, build_counter
+from app.ingest import IngestPayload, IngestStore
 from app.logging_setup import configure_logging
 from app.metrics import (
     counter_value,
@@ -33,6 +34,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.repo = repo
         app.state.settings = settings
+        app.state.ingest = None
+        if settings.ingest_enabled:
+            ingest_store = IngestStore(settings)
+            await ingest_store.connect()
+            app.state.ingest = ingest_store
+            log.info("ingest.connected", extra={"db": settings.pg_database})
         restarts = await repo.record_restart()
         restart_count.set(restarts)
         counter_value.set(await repo.value())
@@ -42,12 +49,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "version": settings.app_version,
                 "backend": settings.backend,
                 "restarts": restarts,
+                "ingest_enabled": settings.ingest_enabled,
             },
         )
         try:
             yield
         finally:
             await repo.close()
+            if app.state.ingest is not None:
+                await app.state.ingest.close()
             log.info("service.stopped")
 
     app = FastAPI(
@@ -104,6 +114,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/metrics")
     async def metrics() -> Response:
         return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
+
+    @app.post("/ingest", status_code=201)
+    async def ingest(payload: IngestPayload, request: Request) -> Response:
+        """Write a counter sample to the Crossplane-provisioned Postgres table.
+
+        Returns 503 if the ingest sink isn't wired (env var
+        COUNTER_INGEST_ENABLED=false or the Postgres backend isn't reachable).
+        """
+        store: IngestStore | None = request.app.state.ingest
+        if store is None:
+            return Response(content="ingest disabled\n", status_code=503, media_type="text/plain")
+        await store.insert(payload)
+        return Response(content="ingested\n", status_code=201, media_type="text/plain")
 
     log.info("app.created", extra={"version": __version__, "app_version": settings.app_version})
     return app

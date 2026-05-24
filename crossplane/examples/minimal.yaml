@@ -1,0 +1,19 @@
+---
+# Minimal XAppDatabase: one database, one table.
+apiVersion: database.platform.example.com/v1alpha1
+kind: XAppDatabase
+metadata:
+  name: minimal-db
+spec:
+  parameters:
+    database: minimal_db
+    schema: public
+    tables:
+      - name: visits
+        columns:
+          - { name: id,          type: "serial primary key" }
+          - { name: visited_at,  type: "timestamp not null" }
+          - { name: visitor_ip,  type: "varchar(45)" }
+  writeConnectionSecretToRef:
+    name: minimal-db-conn
+    namespace: default

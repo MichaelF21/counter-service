@@ -1,0 +1,23 @@
+---
+# Used by counter-service /ingest. Provisions a Postgres database
+# `counter_data` with an `events(date, counter_values, restart_count)` table
+# and publishes the connection Secret into the prod namespace where the
+# Deployment can mount it as env.
+apiVersion: database.platform.example.com/v1alpha1
+kind: XAppDatabase
+metadata:
+  name: counter-data
+spec:
+  parameters:
+    database: counter_data
+    schema: public
+    tables:
+      - name: events
+        columns:
+          - { name: id,             type: "serial primary key" }
+          - { name: date,           type: "timestamp not null" }
+          - { name: counter_values, type: "bigint not null" }
+          - { name: restart_count,  type: "int not null" }
+  writeConnectionSecretToRef:
+    name: counter-data-conn
+    namespace: prod

@@ -1,0 +1,29 @@
+---
+# function-patch-and-transform: the modern way to do field-level patches in
+# Composition Pipelines. Replaces the legacy `resources[]` block.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-patch-and-transform
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.7.0
+---
+# function-go-templating: renders managed resources from a Go text/template
+# with access to the XR's spec. Lets us emit one resource per table (or in
+# our case, one Job whose script iterates over spec.parameters.tables[]) without
+# hand-writing patches.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-go-templating
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.9.0
+---
+# function-auto-ready: flips the XR Ready=True once all composed resources
+# are Ready. Removes the need to model that logic in our templates.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-auto-ready
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.4.0
