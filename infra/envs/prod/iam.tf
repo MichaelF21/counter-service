@@ -24,6 +24,7 @@ resource "aws_iam_role" "github_actions" {
 }
 
 resource "aws_iam_role_policy" "github_actions" {
+  name = "ecr-and-tf-state"
   role = aws_iam_role.github_actions.id
   policy = templatefile("${path.module}/policies/github-actions-inline.json.tpl", {
     ecr_repository_arn  = aws_ecr_repository.counter_service.arn
@@ -32,15 +33,33 @@ resource "aws_iam_role_policy" "github_actions" {
   })
 }
 
-# Terraform plan/apply must refresh every resource in state (EKS, KMS, IAM
-# roles, VPC, CloudWatch logs, etc.). For this assignment we attach
-# AdministratorAccess to the CI role. In real prod, scope this down via:
-#   - per-service Allow policies on resources matching `*counter-service*`
-#   - or a Permissions Boundary that caps blast radius
-#   - or a SCP at the OU level
-resource "aws_iam_role_policy_attachment" "github_actions_admin" {
+# Scoped permissions for terraform plan/apply, replacing AdministratorAccess.
+#
+# PowerUserAccess covers every non-IAM action (EKS, EC2/VPC, KMS, ECR, S3,
+# CloudWatch, AutoScaling, ELBv2, etc.) — that's the bulk of what the prod
+# stack manages.
+#
+# A second inline policy adds IAM operations, but scoped to:
+#   - roles + policies named `${cluster_name}-*` or `AmazonEKS_*` (covers the
+#     EKS module's auto-named policies and our own resources)
+#   - OIDC providers (account-global, only one for GitHub Actions exists)
+#   - service-linked roles (for autoscaling, EKS, ELB)
+#
+# Net effect: a compromised CI role cannot touch unrelated IAM principals in
+# the shared Check Point account — blast radius is bounded to this project.
+resource "aws_iam_role_policy_attachment" "github_actions_poweruser" {
   role       = aws_iam_role.github_actions.name
-  policy_arn = "arn:${local.partition}:iam::aws:policy/AdministratorAccess"
+  policy_arn = "arn:${local.partition}:iam::aws:policy/PowerUserAccess"
+}
+
+resource "aws_iam_role_policy" "github_actions_iam" {
+  name = "iam-scoped"
+  role = aws_iam_role.github_actions.id
+  policy = templatefile("${path.module}/policies/github-actions-iam.json.tpl", {
+    account_id   = local.account_id
+    partition    = local.partition
+    cluster_name = var.cluster_name
+  })
 }
 
 ###############################################################################
